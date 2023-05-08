@@ -1,0 +1,277 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Nov 22 14:05:07 2020
+
+@author: Ching-Chuan Tsong
+"""
+
+#111/09/07, 111/12/17
+
+"""
+以下code參考PFF 15-1 SMA. 
+109/11/23, 110/10/10, 110/11/22, 110/12/24, 111/08/02
+111/12/17(for mypython39 OK!)
+"""
+
+#===============================
+#讀取台積電股價
+#===============================
+
+"""
+#######################
+記得先安裝: 
+    Anaconda Prompt: pip install pandas-datareader 
+    pip install yfinance==0.1.70. 注意: 不要安裝最新版!    
+#######################
+"""
+
+##############################
+import pandas as pd
+import numpy as np
+from datetime import datetime  # 處理日期套件
+import matplotlib.pyplot as plt
+from pylab import mpl
+import seaborn as sns
+
+#import pandas_datareader.data as web #抓取yahoo股價的套件
+#import yfinance as yf #抓股票資料 pip install yfinance==0.1.70. 注意: 不要安裝最新版!
+
+from itertools import product
+#import mpl_finance as mpf #導入蠟燭圖套件 (必須將mpl_finance.py放在該程式同一目錄)
+#from talib import abstract 
+#import talib  #專門做『技術分析』的套件
+
+#import warnings #忽略warnings  111/12/11  for python 3.9
+################################
+
+sns.set() #seaborn預設的組合風格. 預設: sns.set(style = "darkgrid")
+#plt.style.use('seaborn')
+mpl.rcParams['font.family'] = 'serif'
+
+#sns.set_palette("deep") #設定調色盤 "deep", "tab10"
+#===================================#
+
+#設定np列印格式. suppress=True:取消科學記數法
+np.set_printoptions(precision=5, suppress=True,
+                    formatter={'float': lambda x: f'{x:6.3f}'})
+
+# df設定列印格式
+#pd.set_option('display.precision', 3)
+pd.set_option('display.float_format', lambda x: f'{x:6.3f}')
+
+#warnings.filterwarnings("ignore") #忽略warnings  111/12/11
+#=====================================#
+
+"""
+#台積: 2330.TW. 鴻海: 2317.TW
+stock_id = '2317.TW'
+start = datetime(2016, 1, 1)
+end = datetime(2020, 11, 20)
+
+##########################################
+#df_2330 = web.DataReader(stock_id, 'yahoo', start, end) #0050, df
+
+#111/12/17 OK!
+df_2330 = yf.download(stock_id,
+                       start=start,
+                       end=end,
+                       progress=False) #progress=False:省略當前進度
+###########################################
+
+df_2330.to_csv("SMA交易策略數據.csv")
+"""
+
+###################################
+###################################
+
+
+"""
+==========================
+讀取數據
+==========================
+"""
+
+stock_id = '2317.TW'
+df_2330 = pd.read_csv("SMA交易策略數據.csv", parse_dates=True, index_col=0)
+
+df_2330.head(5)
+
+df_2330.info()
+df_2330.columns
+df_2330.isnull().any() #沒有NaN
+
+data = pd.DataFrame(df_2330['Close']) #取收盤價, 轉成df
+
+data.head()
+
+#or 
+data2 = df_2330[['Close']]
+data2.head()
+#================================================#
+
+SMA1 = 20
+SMA2 = 60
+
+data['SMA1'] = data['Close'].rolling(SMA1).mean()
+data['SMA2'] = data['Close'].rolling(SMA2).mean()
+
+data.info()
+data.head(25)
+data.dropna(inplace=True)
+data.head()
+
+data.plot(figsize=(10, 6))
+plt.title(stock_id, fontsize=24)
+plt.show()
+#=========================================#
+
+#黃金交叉: 買進(1); 死亡交叉: 放空(-1)
+data['pos_ma'] = np.where(data['SMA1'] > data['SMA2'], 1, -1)
+data.head()
+
+data.plot(secondary_y='pos_ma', figsize=(10, 6))
+plt.title(stock_id, fontsize=20)
+plt.show()
+#============================================#
+
+#練習: 計算position個數
+data['pos_ma'].value_counts()
+
+data['pos_ma'].value_counts().plot(kind="bar", figsize=(10, 6),
+                                   edgecolor="k", lw=1.5,
+                                   rot=0)
+plt.title(f"Number of position for {stock_id}", fontsize=20)
+plt.show()
+#============================================#
+
+#產生return的column
+data['return'] = np.log(data['Close'] / data['Close'].shift(1))
+
+#注意: data['pos_ma'].shift(1) 前一期position計算下期的報酬
+data['strat_ma'] = data['return'] * data['pos_ma'].shift(1)
+
+data.head(5)
+
+data.dropna(inplace=True)
+data.head()
+
+#期末e^r. 'return': 買入持有到期末的總報酬
+data[['return', 'strat_ma']].sum().apply(np.exp)
+
+ax = data[['return', 'strat_ma']].cumsum().apply(np.exp).plot(figsize=(10, 6))
+data[['pos_ma']].plot(ax=ax, secondary_y="pos_ma", c='m')
+plt.title(stock_id, fontsize=24)
+plt.show()
+#===================================================#
+
+#找出最佳SMA1與SMA2的組合
+# 先測試指令
+from itertools import product
+
+sma1 = range(20, 41, 5) #5個
+sma2 = range(60, 81, 5) #5個
+list(sma1)
+list(sma2)
+
+for SMA1, SMA2 in product(sma1, sma2):
+    print("(SMA1, SMA2)= ", (SMA1, SMA2))
+#=====================================================#
+
+ptc = 0.003 #考慮交易成本
+results = pd.DataFrame()
+
+for SMA1, SMA2 in product(sma1, sma2):
+    data = pd.DataFrame(df_2330['Close']) #取收盤價
+    data['return'] = np.log(data['Close'] / data['Close'].shift(1))
+    data['SMA1'] = data['Close'].rolling(SMA1).mean()
+    data['SMA2'] = data['Close'].rolling(SMA2).mean()
+    
+    data['pos_ma'] = np.where(data['SMA1']>data['SMA2'], 1, -1)
+    data['strat_ma'] = data['return'] * data['pos_ma'].shift(1)
+    
+    ###########################
+    #考慮交易成本
+    #recall: data["pos_ma"].value_counts() #1 or -1
+    data['strat_ma_ptc'] = np.where(data['pos_ma'].shift(1).diff()!= 0,                                   
+                           data['strat_ma']-2*ptc,
+                           data['strat_ma'])
+    ###########################
+        
+    data.dropna(inplace=True)
+    
+    #最終績效
+    perf = np.exp(data[['return', 'strat_ma', 'strat_ma_ptc']].sum()) 
+    profit = perf['strat_ma_ptc'] - perf["return"]
+    
+    result = pd.DataFrame({'SMA1': SMA1,
+                           'SMA2': SMA2,
+                           'Market': perf["return"],
+                           'MA_strat': perf['strat_ma'],
+                           'MA_strat_ptc': perf['strat_ma_ptc'],
+                           'OUT': profit,}, index=[0])
+    
+    #results = results.append(result, ignore_index=True)
+    results = pd.concat([results, result], ignore_index=True)
+    
+results  
+  
+results.info()        
+results.head()
+results.shape[0]   
+#========================================#
+
+#最佳: (40, 70), 最差: (20, 60)
+best_to_worse = results.sort_values(by='OUT', ascending=False)
+
+best_to_worse.iloc[0][['SMA1',  'SMA2']]
+best_to_worse.iloc[-1][['SMA1',  'SMA2']] 
+
+#最佳SMAs對應之期末returns
+best_to_worse.iloc[0][['Market', 'MA_strat', 'MA_strat_ptc']] 
+
+#最差SMAs對應之期末returns  
+best_to_worse.iloc[-1][['Market', 'MA_strat', 'MA_strat_ptc']] 
+
+#=================================#
+#畫出最佳與最差圖型. 先寫成函數
+def plot_proc(SMA1, SMA2):
+    data = pd.DataFrame(df_2330['Close']) 
+    data['return'] = np.log(data['Close']/data['Close'].shift(1))
+    data['SMA1'] = data['Close'].rolling(SMA1).mean()
+    data['SMA2'] = data['Close'].rolling(SMA2).mean()
+    data.dropna(inplace=True)
+    
+    data['pos_ma'] = np.where(data['SMA1'] > data['SMA2'], 1, -1)    
+    data['strat_ma'] = data['pos_ma'].shift(1) * data['return']
+    
+    ###########################
+    #考慮交易成本
+    #recall: data["pos_ma"].value_counts() #1 or -1
+    data['strat_ma_ptc'] = np.where(data['pos_ma'].shift(1).diff()!= 0,                                   
+                           data['strat_ma']-2*ptc,
+                           data['strat_ma'])
+    ###########################
+    
+    data.dropna(inplace=True)
+    
+    ax = data[['return', 'strat_ma', 'strat_ma_ptc']].cumsum().apply(np.exp)\
+        .plot(figsize=(10, 6))
+    data[['pos_ma']].plot(ax=ax, style='--', secondary_y='pos_ma')                 
+    ax.set_title(f"{stock_id} (SMA1={SMA1}, SMA2={SMA2})", fontsize=20)
+
+    plt.show()
+#================================================#
+
+
+SMA1_best = best_to_worse.iloc[0]['SMA1'].astype(int)
+SMA2_best = best_to_worse.iloc[0]['SMA2'].astype(int)
+
+plot_proc(SMA1_best, SMA2_best)
+
+SMA1_worse = best_to_worse.iloc[-1]['SMA1'].astype(int)
+SMA2_worse = best_to_worse.iloc[-1]['SMA2'].astype(int)
+SMA1_worse
+SMA2_worse 
+
+plot_proc(SMA1_worse, SMA2_worse)
+#====================================================#
